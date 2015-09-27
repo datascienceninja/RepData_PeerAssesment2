@@ -1,0 +1,107 @@
+---
+title: "Health & Economic Impacts of Storm Events"
+author: "Tim Healy"
+date: "September 26, 2015"
+output: html_document
+---
+### Synopsis
+
+Using data from the US National Oceanic and Atmospheric Administration ("NOAA") storm database, this report reviewed the health and economic impacts of the various types of weather events. It is clear from the analysis that ice storms, hurricanes, and tsunamis have large health impacts, while hurricanes, wildfires, and excessive heat have large economic impacts. Government and municipal managers should prioritize resources appropriately in preparation for such events.
+
+### Data Processing
+
+First the NOAA data set is downloaded from the course server and read into R. 
+```{r cache=TRUE}
+setwd("~/G_WD/R/RepData_PeerAssesment2")
+url = "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+file = "repdata-data-StormData.csv"
+
+if(!file.exists(file)) {
+    download.file(url, file.path(getwd(), file))
+    dataRAW = read.csv(file, header = TRUE)
+} else {
+    dataRAW = read.csv(file, header = TRUE)
+}
+
+```
+
+To trim the rather large size of the data frame, events with zero injuries, fatalities, crop and property damage were removed from the data set. 
+```{r cache=TRUE}
+dataTRIM = subset(dataRAW, 
+                  !(dataRAW$FATALITIES == 0) & 
+                  !(dataRAW$INJURIES == 0) &
+                  !(dataRAW$PROPDMG == 0) &
+                  !(dataRAW$CROPDMG == 0)
+)
+
+```
+
+Property and crop damage figures had to be converted to thousands, millions, etc. based on the "PROPDMGEXP" and "CROPDMGEXP" columns.
+```{r cache=TRUE}
+ltr  <- c("B" , "M" , "K", "")
+mult <- c(10^9, 10^6, 10^3, 0)
+
+dataTRIM$PROPDMG2 <- dataTRIM$PROPDMG * mult[match(dataTRIM$PROPDMGEXP, ltr)]
+dataTRIM$CROPDMG2 <- dataTRIM$CROPDMG * mult[match(dataTRIM$CROPDMGEXP, ltr)]
+
+```
+
+Finally, event types had to be mapped to the 48 official weather event types, according to the National Weather Service. For this analysis, only event types matching the official National Weather Service designation were used, leaving a ~170K event sample size. This is sufficient for the purpose of assessing the relative health and economic impacts of the different event types.
+```{r cache=TRUE}
+library(searchable)
+Events <- c("Astronomical Low Tide", "Avalanche", "Blizzard", "Coastal Flood", "Cold/Wind Chill", "Debris Flow", "Dense Fog", "Dense Smoke", "Drought", "Dust Devil", "Dust Storm", "Excessive Heat", "Extreme Cold/Wind Chill", "Flash Flood", "Flood", "Freezing Fog", "Frost/Freeze", "Funnel Cloud", "Hail", "Heat", "Heavy Rain", "Heavy Snow", "High Surf", "High Wind", "Hurricane/Typhoon", "Ice Storm", "Lakeshore Flood", "Lake-Effect Snow", "Lightning", "Marine Hail", "Marine High Wind", "Marine Strong Wind", "Marine Thunderstorm Wind", "Rip Current", "Seiche", "Sleet", "Storm Tide", "Strong Wind", "Thunderstorm Wind", "Tornado", "Tropical Depression", "Tropical Storm", "Tsunami", "Volcanic Ash", "Waterspout", "Wildfire", "Winter Storm", "Winter Weather")
+
+dataTRIM$NWS_Event = tolower(dataTRIM$EVTYPE) %in% tolower(Events)
+dataTRIM = subset(dataTRIM, dataTRIM$NWS_Event == TRUE)
+dataTRIM$EVTYPE = toupper(dataTRIM$EVTYPE)
+
+```
+
+### Summarizing Health & Economic Impacts
+To assess storm impacts on population health and economics, this analysis reviews the average **fatalities**, **injuries**,**crop damage**, and **property damage** by each of the various storm types. Averages are used to assess how harmful and costly storms are, on a "per-event" basis.
+```{r}
+library(plyr)
+popINJ = ddply(dataTRIM, 'EVTYPE', function(x) {mean(x$INJURIES, na.rm = TRUE)})
+colnames(popINJ) [2] = "Average Injuries"
+popINJ$`Average Injuries`= round(popINJ$`Average Injuries`, digits = 1)
+
+popFAT = ddply(dataTRIM, 'EVTYPE', function(x) {mean(x$FATALITIES, na.rm = TRUE)})
+colnames(popFAT) [2] = "Average Fatalities"
+popFAT$`Average Fatalities`= round(popFAT$`Average Fatalities`, digits = 1)
+
+popPROP = ddply(dataTRIM, 'EVTYPE', function(x) {mean(x$PROPDMG2, na.rm = TRUE)})
+colnames(popPROP) [2] = "Average Property Damage"
+popPROP$`Average Property Damage`= round(popPROP$`Average Property Damage`, digits = 0)
+
+
+popCROP = ddply(dataTRIM, 'EVTYPE', function(x) {mean(x$CROPDMG2, na.rm = TRUE)})
+colnames(popCROP) [2] = "Average Crop Damage"
+popCROP$`Average Crop Damage`= round(popCROP$`Average Crop Damage`, digits = 0)
+
+
+popHEALTH = merge(popINJ, popFAT, by = 'EVTYPE')
+popHEALTH = subset(popHEALTH, !popHEALTH$`Average Injuries` == 0.0 | !popHEALTH$`Average Fatalities` == 0)
+
+popDMG = merge(popPROP, popCROP, by = 'EVTYPE')
+popDMG = subset(popDMG, !popDMG$`Average Property Damage` == 0.0 | !popDMG$`Average Crop Damage` == 0)
+
+```
+
+### Results
+
+First, the health metrics are plotted in a horizontal bar plot. According to the analysis, ice storms cause the most injuries, followed by hurricanes, while excessive heat causes the most fatalities, followed by tsunamis. 
+```{r cache=TRUE, fig.height=8}
+library(ggplot2)
+library(reshape2)
+plotHEALTH = melt(popHEALTH, id.vars='EVTYPE')
+ggplot(plotHEALTH, aes(x=EVTYPE, y=value)) + geom_bar(stat='identity') + facet_grid(.~variable) + coord_flip() + labs(x='',y='') + ggtitle("Population Health Impacts of Weather Events")
+
+```
+
+Next, the economic metrics are plotted in a horizontal bar plot. According to the analysis, hurricanes cause the most property damage (by a large margin) and crop damage. Wildfires cause the second most property damage, while excessive heat causes the second most crop damage.
+```{r cache=TRUE, fig.height=10}
+plotDMG = melt(popDMG, id.vars='EVTYPE')
+plotDMG$value = plotDMG$value / 1000000
+ggplot(plotDMG, aes(x=EVTYPE, y=value)) + geom_bar(stat='identity') + facet_grid(.~variable) + coord_flip() + labs(x='',y='$MM') + ggtitle("Population Economic Impacts of Weather Events")
+
+```
